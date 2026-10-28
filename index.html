@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lydbogshylden</title>
+<meta name="description" content="Danske lydbøger fra LibriVox — frie, oplæst på dansk, kan lyttes offline.">
+<meta name="theme-color" content="#1b1430">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Lydbøger">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+:root{--bg:#1b1430;--kort:#2a2145;--kort2:#352a57;--tekst:#f3e9d2;--svag:#b9ad95;--guld:#e8b45a;--groen:#7fa88a;--roed:#d07a6a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tekst);font:18px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{padding:env(safe-area-inset-top) 16px calc(230px + env(safe-area-inset-bottom))}
+h1{font-size:28px;margin:18px 0 4px}
+.under{color:var(--svag);font-size:15px;margin:0 0 16px}
+button{font:inherit;color:inherit;border:0;border-radius:14px;cursor:pointer}
+.bog{display:block;width:100%;text-align:left;background:var(--kort);padding:16px;margin:0 0 12px}
+.bog b{display:block;font-size:20px}
+.bog span{color:var(--svag);font-size:15px}
+.maerke{display:inline-block;font-size:13px;padding:2px 8px;border-radius:99px;background:var(--kort2);margin-top:6px}
+.maerke.ok{background:var(--groen);color:#14201a}
+.tilbage{background:none;color:var(--guld);padding:12px 0;font-size:18px}
+.handling{background:var(--kort2);padding:14px 16px;margin:0 8px 8px 0;min-height:52px}
+.handling.guld{background:var(--guld);color:#2a1d05;font-weight:600}
+.spor{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--kort);padding:14px 16px;margin:0 0 8px;min-height:60px}
+.spor.nu{outline:3px solid var(--guld)}
+.spor .nr{color:var(--svag);min-width:28px}
+.spor .t{flex:1}
+.spor .d{color:var(--svag);font-size:15px}
+.bm{display:flex;gap:8px;align-items:center;background:var(--kort);border-radius:14px;padding:6px 6px 6px 14px;margin:0 0 8px}
+.bm .t{flex:1;font-size:16px}
+.bm button{background:var(--kort2);padding:10px 14px}
+.kredit{color:var(--svag);font-size:14px;margin:18px 0}
+.kredit a{color:var(--guld)}
+#afspiller{position:fixed;left:0;right:0;bottom:0;background:#120d22;border-top:1px solid #3a2f5e;padding:12px 16px calc(12px + env(safe-area-inset-bottom))}
+#afspiller.skjult{display:none}
+#nu{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#nu small{color:var(--svag)}
+#tid{display:flex;gap:10px;align-items:center;font-size:14px;color:var(--svag);margin:6px 0}
+#tid input{flex:1;accent-color:var(--guld);height:32px}
+.knapper{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.knapper button{background:var(--kort);min-width:64px;height:64px;font-size:18px}
+#spil{background:var(--guld);color:#2a1d05;width:96px;height:96px;border-radius:50%;font-size:40px}
+.smaa{display:flex;gap:8px;margin-top:10px}
+.smaa button{flex:1;background:var(--kort);padding:10px 4px;font-size:15px;min-height:48px}
+.smaa button.aktiv{background:var(--groen);color:#14201a}
+#besked{position:fixed;left:16px;right:16px;top:calc(12px + env(safe-area-inset-top));background:var(--guld);color:#2a1d05;padding:12px 16px;border-radius:14px;display:none;z-index:9}
+.fejl{color:var(--roed)}
+</style>
+</head>
+<body>
+<main id="vis"></main>
+<div id="besked"></div>
+
+<section id="afspiller" class="skjult" aria-label="Afspiller">
+  <div id="nu"></div>
+  <div id="tid"><span id="pos">0:00</span><input id="spole" type="range" min="0" max="100" step="1" value="0" aria-label="Spol"><span id="laengde">0:00</span></div>
+  <div class="knapper">
+    <button id="forrige" aria-label="Forrige kapitel">⏮</button>
+    <button id="tilbage30" aria-label="30 sekunder tilbage">−30</button>
+    <button id="spil" aria-label="Afspil">▶</button>
+    <button id="frem30" aria-label="30 sekunder frem">+30</button>
+    <button id="naeste" aria-label="Næste kapitel">⏭</button>
+  </div>
+  <div class="smaa">
+    <button id="sove">🌙 Sove: fra</button>
+    <button id="fart">Fart 1×</button>
+    <button id="bogmaerke">🔖 Bogmærke</button>
+  </div>
+</section>
+
+<audio id="lyd" preload="metadata"></audio>
+
+<script>
+"use strict";
+const CACHE_LYD = "lydbogshylden-lyd-v1";
+const $ = s => document.querySelector(s);
+const lyd = $("#lyd");
+let KATALOG = null, aktivBog = null, aktivtSpor = 0, blobUrl = null;
+let soveSlut = null, soveKapitel = false, soveTimer = null;
+
+// ——— små hjælpere ———
+const gem = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const hent = (k, std) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : std; } catch (e) { return std; } };
+const tid = s => { s = Math.max(0, Math.floor(s || 0)); const t = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return t ? `${t}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
+const varighed = s => { const t = Math.floor(s / 3600), m = Math.round(s % 3600 / 60); return t ? `${t} t ${m} min` : `${m} min`; };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function besked(t, ms = 2500) { const b = $("#besked"); b.textContent = t; b.style.display = "block"; clearTimeout(besked.t); besked.t = setTimeout(() => b.style.display = "none", ms); }
+
+// ——— offline-lager ———
+// lageret må aldrig holde skærmen tilbage: svarer det ikke inden 3 sek, regnes bogen som ikke gemt
+const medFrist = (p, ms, std) => Promise.race([p, new Promise(r => setTimeout(() => r(std), ms))]);
+async function erGemt(url) { try { return !!(await medFrist((async () => (await caches.open(CACHE_LYD)).match(url))(), 3000, null)); } catch (e) { return false; } }
+async function antalGemt(bog) { return (await Promise.all(bog.spor.map(s => erGemt(s.url)))).filter(Boolean).length; }
+
+async function gemBog(bog, knap) {
+  try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
+  const c = await caches.open(CACHE_LYD);
+  let i = 0;
+  for (const s of bog.spor) {
+    i++;
+    if (await c.match(s.url)) continue;
+    knap.textContent = `Henter ${i} af ${bog.spor.length} …`;
+    try {
+      const r = await fetch(s.url, { mode: "cors" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const blob = await r.blob();
+      await c.put(s.url, new Response(blob, { headers: { "Content-Type": "audio/mpeg", "Content-Length": String(blob.size) } }));
+    } catch (e) {
+      knap.innerHTML = `<span class="fejl">Stoppede ved kapitel ${i}. Tjek nettet og prøv igen.</span>`;
+      return;
+    }
+  }
+  besked("Bogen er gemt på telefonen ✓");
+  visBog(bog.id);
+}
+
+async function sletBog(bog) {
+  const c = await caches.open(CACHE_LYD);
+  for (const s of bog.spor) await c.delete(s.url);
+  besked("Fjernet fra telefonen");
+  visBog(bog.id);
+}
+
+// ——— visninger ———
+async function visHylde() {
+  const sidst = hent("sidst", null);
+  let html = `<h1>Lydbogshylden</h1><p class="under">Danske lydbøger, oplæst af frivillige på LibriVox.</p>`;
+  if (sidst) {
+    const b = KATALOG.bøger.find(x => x.id === sidst);
+    const p = b && hent("pos:" + b.id, null);
+    if (b && p) html += `<button class="bog" style="background:var(--kort2)" data-fortsaet="${b.id}"><span>Fortsæt</span><b>${esc(b.titel)}</b><span>${esc(b.spor[p.spor]?.titel || "")} · ${tid(p.tid)}</span></button>`;
+  }
+  for (const b of KATALOG.bøger) {
+    html += `<button class="bog" data-bog="${b.id}"><b>${esc(b.titel)}</b><span>${esc(b.forfatter)} · ${varighed(b.sek)}</span><br><span id="m-${b.id}"></span></button>`;
+  }
+  html += `<p class="kredit">Alle optagelser er doneret til public domain af LibriVox' frivillige oplæsere. Teksterne er frie efter dansk lov. Tak til dem, der skrev, oversatte og læste højt.</p>`;
+  $("#vis").innerHTML = html;
+  $("#vis").querySelectorAll("[data-bog]").forEach(e => e.onclick = () => visBog(e.dataset.bog));
+  $("#vis").querySelectorAll("[data-fortsaet]").forEach(e => e.onclick = () => { const b = KATALOG.bøger.find(x => x.id === e.dataset.fortsaet); const p = hent("pos:" + b.id, { spor: 0, tid: 0 }); spil(b, p.spor, p.tid); visBog(b.id); });
+  history.replaceState(null, "", "#");
+  for (const b of KATALOG.bøger) antalGemt(b).then(n => {
+    const e = document.getElementById("m-" + b.id); if (!e) return;
+    e.outerHTML = n === b.spor.length ? `<span class="maerke ok">✓ på telefonen</span>` : n ? `<span class="maerke">${n}/${b.spor.length} gemt</span>` : "";
+  });
+}
+
+async function visBog(id) {
+  const b = KATALOG.bøger.find(x => x.id === id);
+  if (!b) return visHylde();
+  const n = await antalGemt(b);
+  const p = hent("pos:" + b.id, null);
+  const mb = Math.round(b.spor.reduce((a, s) => a + s.bytes, 0) / 1e6);
+  let html = `<button class="tilbage" id="tilHylde">‹ Hylden</button><h1>${esc(b.titel)}</h1>
+    <p class="under">${esc(b.forfatter)}${b.oversætter ? " · oversat af " + esc(b.oversætter) : ""}<br>Læst af ${esc(b.oplæsere.join(", "))} · ${varighed(b.sek)}</p>
+    <div><button class="handling guld" id="start">${p ? "▶ Fortsæt" : "▶ Start"}</button>`;
+  html += n === b.spor.length
+    ? `<button class="handling" id="slet">✓ På telefonen · fjern</button>`
+    : `<button class="handling" id="gemKnap">⬇ Gem til offline (${mb} MB)${n ? ` · ${n}/${b.spor.length}` : ""}</button>`;
+  html += `</div>`;
+  const bms = hent("bm:" + b.id, []);
+  if (bms.length) {
+    html += `<h2 style="font-size:18px;margin:18px 0 8px">Bogmærker</h2>`;
+    bms.forEach((m, i) => html += `<div class="bm"><span class="t">${esc(b.spor[m.spor]?.titel)} · ${tid(m.tid)}</span><button data-hop="${i}">Hop</button><button data-fjern="${i}" aria-label="Fjern">✕</button></div>`);
+  }
+  html += `<h2 style="font-size:18px;margin:18px 0 8px">Kapitler</h2>`;
+  for (let i = 0; i < b.spor.length; i++) {
+    const s = b.spor[i], nu = aktivBog === b && aktivtSpor === i;
+    html += `<button class="spor${nu ? " nu" : ""}" data-spor="${i}"><span class="nr">${i + 1}</span><span class="t">${esc(s.titel)}</span><span class="d">${tid(s.sek)}</span></button>`;
+  }
+  html += `<p class="kredit">Kilde: <a href="${esc(b.kilde)}" target="_blank" rel="noopener">LibriVox</a>. Optagelsen er public domain.</p>`;
+  $("#vis").innerHTML = html;
+  $("#tilHylde").onclick = visHylde;
+  $("#start").onclick = () => { const q = hent("pos:" + b.id, { spor: 0, tid: 0 }); spil(b, q.spor, q.tid); };
+  if ($("#gemKnap")) $("#gemKnap").onclick = e => { e.target.onclick = null; gemBog(b, e.target); };
+  if ($("#slet")) $("#slet").onclick = () => sletBog(b);
+  $("#vis").querySelectorAll("[data-spor]").forEach(e => e.onclick = () => spil(b, +e.dataset.spor, 0));
+  $("#vis").querySelectorAll("[data-hop]").forEach(e => e.onclick = () => { const m = bms[+e.dataset.hop]; spil(b, m.spor, m.tid); });
+  $("#vis").querySelectorAll("[data-fjern]").forEach(e => e.onclick = () => { bms.splice(+e.dataset.fjern, 1); gem("bm:" + b.id, bms); visBog(b.id); });
+  history.replaceState(null, "", "#" + b.id);
+  window.scrollTo(0, 0);
+}
+
+// ——— afspilning ———
+async function kilde(url) {
+  try {
+    const r = await (await caches.open(CACHE_LYD)).match(url);
+    if (r) { if (blobUrl) URL.revokeObjectURL(blobUrl); blobUrl = URL.createObjectURL(await r.blob()); return blobUrl; }
+  } catch (e) {}
+  return url; // stream direkte fra archive.org
+}
+
+async function spil(bog, i, fra = 0) {
+  if (i >= bog.spor.length) { gemPos(); besked("Bogen er slut 🌙", 4000); return; }
+  aktivBog = bog; aktivtSpor = i;
+  const s = bog.spor[i];
+  lyd.src = await kilde(s.url);
+  lyd.playbackRate = hent("fart", 1);
+  lyd.addEventListener("loadedmetadata", () => { if (fra) lyd.currentTime = fra; }, { once: true });
+  try { await lyd.play(); } catch (e) { besked("Tryk ▶ for at starte"); }
+  gem("sidst", bog.id);
+  $("#afspiller").classList.remove("skjult");
+  $("#nu").innerHTML = `${esc(s.titel)} <small>· ${esc(bog.titel)}</small>`;
+  if ("mediaSession" in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: s.titel, artist: bog.forfatter, album: bog.titel,
+      artwork: [{ src: "icon-512.png", sizes: "512x512", type: "image/png" }] });
+    navigator.mediaSession.setActionHandler("seekbackward", () => spring(-30));
+    navigator.mediaSession.setActionHandler("seekforward", () => spring(30));
+    navigator.mediaSession.setActionHandler("previoustrack", forrige);
+    navigator.mediaSession.setActionHandler("nexttrack", () => spil(aktivBog, aktivtSpor + 1));
+  }
+  if (location.hash.slice(1) === bog.id) visBog(bog.id);
+}
+
+function gemPos() { if (aktivBog) gem("pos:" + aktivBog.id, { spor: aktivtSpor, tid: Math.floor(lyd.currentTime || 0) }); }
+function spring(d) { lyd.currentTime = Math.max(0, Math.min((lyd.duration || 0) - 1, lyd.currentTime + d)); gemPos(); }
+function forrige() { if (lyd.currentTime > 5 || aktivtSpor === 0) { lyd.currentTime = 0; } else spil(aktivBog, aktivtSpor - 1); }
+
+lyd.addEventListener("play", () => $("#spil").textContent = "❚❚");
+lyd.addEventListener("pause", () => { $("#spil").textContent = "▶"; gemPos(); });
+lyd.addEventListener("timeupdate", () => {
+  $("#pos").textContent = tid(lyd.currentTime);
+  $("#laengde").textContent = tid(lyd.duration);
+  if (lyd.duration) $("#spole").value = 100 * lyd.currentTime / lyd.duration;
+  if (Math.floor(lyd.currentTime) % 5 === 0) gemPos();
+});
+lyd.addEventListener("ended", () => {
+  if (soveKapitel) { soveKapitel = false; opdaterSove(); gem("pos:" + aktivBog.id, { spor: aktivtSpor + 1, tid: 0 }); besked("Godnat 🌙", 4000); return; }
+  spil(aktivBog, aktivtSpor + 1);
+});
+lyd.addEventListener("error", () => besked("Kunne ikke spille kapitlet. Er der net? Gem bogen til offline først.", 5000));
+
+$("#spil").onclick = () => lyd.paused ? lyd.play() : lyd.pause();
+$("#tilbage30").onclick = () => spring(-30);
+$("#frem30").onclick = () => spring(30);
+$("#forrige").onclick = forrige;
+$("#naeste").onclick = () => spil(aktivBog, aktivtSpor + 1);
+$("#spole").oninput = e => { if (lyd.duration) lyd.currentTime = lyd.duration * e.target.value / 100; };
+$("#spole").onchange = gemPos;
+
+// fart
+const FARTER = [1, 1.25, 1.5, 0.8];
+$("#fart").onclick = () => { const f = FARTER[(FARTER.indexOf(hent("fart", 1)) + 1) % FARTER.length]; gem("fart", f); lyd.playbackRate = f; $("#fart").textContent = `Fart ${f.toString().replace(".", ",")}×`; };
+$("#fart").textContent = `Fart ${hent("fart", 1).toString().replace(".", ",")}×`;
+
+// bogmærke
+$("#bogmaerke").onclick = () => {
+  if (!aktivBog) return;
+  const l = hent("bm:" + aktivBog.id, []); l.push({ spor: aktivtSpor, tid: Math.floor(lyd.currentTime) }); gem("bm:" + aktivBog.id, l);
+  besked(`🔖 Gemt: ${tid(lyd.currentTime)}`);
+  if (location.hash.slice(1) === aktivBog.id) visBog(aktivBog.id);
+};
+
+// sove-timer: fra → 15 → 30 → 45 → 60 → slut på kapitlet → fra
+const SOVE = [0, 15, 30, 45, 60, "kap"];
+let soveTrin = 0;
+function opdaterSove() {
+  const b = $("#sove");
+  if (soveKapitel) { b.textContent = "🌙 Efter kapitlet"; b.classList.add("aktiv"); return; }
+  if (!soveSlut) { b.textContent = "🌙 Sove: fra"; b.classList.remove("aktiv"); return; }
+  b.textContent = `🌙 ${Math.ceil((soveSlut - Date.now()) / 60000)} min`; b.classList.add("aktiv");
+}
+$("#sove").onclick = () => {
+  soveTrin = (soveTrin + 1) % SOVE.length; const v = SOVE[soveTrin];
+  soveKapitel = v === "kap"; soveSlut = typeof v === "number" && v ? Date.now() + v * 60000 : null;
+  lyd.volume = 1; opdaterSove();
+};
+setInterval(() => {
+  if (!soveSlut) return;
+  const rest = soveSlut - Date.now();
+  if (rest <= 0) { lyd.pause(); lyd.volume = 1; soveSlut = null; soveTrin = 0; opdaterSove(); besked("Godnat 🌙", 4000); return; }
+  if (rest < 15000) lyd.volume = Math.max(0.05, rest / 15000); // blid nedtoning (virker ikke på iPhone, der pauser bare)
+  opdaterSove();
+}, 1000);
+
+document.addEventListener("visibilitychange", gemPos);
+
+// ——— start ———
+(async () => {
+  try { KATALOG = await (await fetch("katalog.json")).json(); }
+  catch (e) { $("#vis").innerHTML = `<h1>Lydbogshylden</h1><p class="fejl">Kunne ikke læse kataloget. Åbn appen én gang med net.</p>`; return; }
+  const id = location.hash.slice(1);
+  id ? visBog(decodeURIComponent(id)) : visHylde();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
+</script>
+</body>
+</html>
