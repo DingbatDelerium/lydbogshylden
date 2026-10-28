@@ -1,5 +1,5 @@
 // Gemmer kun appens skal. Lydfilerne gemmes af siden selv i "lydbogshylden-lyd-v1".
-const CACHE = 'lydbogshylden-app-v1';
+const CACHE = 'lydbogshylden-app-v2';
 const ASSETS = ['./', './index.html', './manifest.json', './katalog.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

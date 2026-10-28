@@ -25,7 +25,7 @@ button{font:inherit;color:inherit;border:0;border-radius:14px;cursor:pointer}
 .bog span{color:var(--svag);font-size:15px}
 .maerke{display:inline-block;font-size:13px;padding:2px 8px;border-radius:99px;background:var(--kort2);margin-top:6px}
 .maerke.ok{background:var(--groen);color:#14201a}
-.tilbage{background:none;color:var(--guld);padding:12px 0;font-size:18px}
+.tilbage{position:sticky;top:0;z-index:5;display:block;width:calc(100% + 32px);margin:0 -16px;text-align:left;background:var(--bg);color:var(--guld);padding:calc(14px + env(safe-area-inset-top)) 16px 14px;font-size:20px;font-weight:600;border-bottom:1px solid #3a2f5e;border-radius:0}
 .handling{background:var(--kort2);padding:14px 16px;margin:0 8px 8px 0;min-height:52px}
 .handling.guld{background:var(--guld);color:#2a1d05;font-weight:600}
 .spor{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--kort);padding:14px 16px;margin:0 0 8px;min-height:60px}
@@ -40,7 +40,7 @@ button{font:inherit;color:inherit;border:0;border-radius:14px;cursor:pointer}
 .kredit a{color:var(--guld)}
 #afspiller{position:fixed;left:0;right:0;bottom:0;background:#120d22;border-top:1px solid #3a2f5e;padding:12px 16px calc(12px + env(safe-area-inset-bottom))}
 #afspiller.skjult{display:none}
-#nu{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#nu{cursor:pointer;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #nu small{color:var(--svag)}
 #tid{display:flex;gap:10px;align-items:center;font-size:14px;color:var(--svag);margin:6px 0}
 #tid input{flex:1;accent-color:var(--guld);height:32px}
@@ -83,6 +83,7 @@ const CACHE_LYD = "lydbogshylden-lyd-v1";
 const $ = s => document.querySelector(s);
 const lyd = $("#lyd");
 let KATALOG = null, aktivBog = null, aktivtSpor = 0, blobUrl = null;
+let hjemFra = false; // true når bogen blev åbnet fra hylden i denne omgang
 let soveSlut = null, soveKapitel = false, soveTimer = null;
 
 // ——— små hjælpere ———
@@ -143,9 +144,9 @@ async function visHylde() {
   }
   html += `<p class="kredit">Alle optagelser er doneret til public domain af LibriVox' frivillige oplæsere. Teksterne er frie efter dansk lov. Tak til dem, der skrev, oversatte og læste højt.</p>`;
   $("#vis").innerHTML = html;
-  $("#vis").querySelectorAll("[data-bog]").forEach(e => e.onclick = () => visBog(e.dataset.bog));
-  $("#vis").querySelectorAll("[data-fortsaet]").forEach(e => e.onclick = () => { const b = KATALOG.bøger.find(x => x.id === e.dataset.fortsaet); const p = hent("pos:" + b.id, { spor: 0, tid: 0 }); spil(b, p.spor, p.tid); visBog(b.id); });
-  history.replaceState(null, "", "#");
+  $("#vis").querySelectorAll("[data-bog]").forEach(e => e.onclick = () => { hjemFra = true; visBog(e.dataset.bog); });
+  $("#vis").querySelectorAll("[data-fortsaet]").forEach(e => e.onclick = () => { const b = KATALOG.bøger.find(x => x.id === e.dataset.fortsaet); hjemFra = true; const p = hent("pos:" + b.id, { spor: 0, tid: 0 }); spil(b, p.spor, p.tid); visBog(b.id); });
+  if (location.hash) history.replaceState(null, "", location.pathname);
   for (const b of KATALOG.bøger) antalGemt(b).then(n => {
     const e = document.getElementById("m-" + b.id); if (!e) return;
     e.outerHTML = n === b.spor.length ? `<span class="maerke ok">✓ på telefonen</span>` : n ? `<span class="maerke">${n}/${b.spor.length} gemt</span>` : "";
@@ -177,14 +178,14 @@ async function visBog(id) {
   }
   html += `<p class="kredit">Kilde: <a href="${esc(b.kilde)}" target="_blank" rel="noopener">LibriVox</a>. Optagelsen er public domain.</p>`;
   $("#vis").innerHTML = html;
-  $("#tilHylde").onclick = visHylde;
+  $("#tilHylde").onclick = () => history.length > 1 && hjemFra ? history.back() : visHylde();
   $("#start").onclick = () => { const q = hent("pos:" + b.id, { spor: 0, tid: 0 }); spil(b, q.spor, q.tid); };
   if ($("#gemKnap")) $("#gemKnap").onclick = e => { e.target.onclick = null; gemBog(b, e.target); };
   if ($("#slet")) $("#slet").onclick = () => sletBog(b);
   $("#vis").querySelectorAll("[data-spor]").forEach(e => e.onclick = () => spil(b, +e.dataset.spor, 0));
   $("#vis").querySelectorAll("[data-hop]").forEach(e => e.onclick = () => { const m = bms[+e.dataset.hop]; spil(b, m.spor, m.tid); });
   $("#vis").querySelectorAll("[data-fjern]").forEach(e => e.onclick = () => { bms.splice(+e.dataset.fjern, 1); gem("bm:" + b.id, bms); visBog(b.id); });
-  history.replaceState(null, "", "#" + b.id);
+  if (location.hash.slice(1) !== b.id) history.pushState(null, "", "#" + b.id);
   window.scrollTo(0, 0);
 }
 
@@ -281,6 +282,9 @@ setInterval(() => {
 }, 1000);
 
 document.addEventListener("visibilitychange", gemPos);
+window.addEventListener("popstate", () => { const id = location.hash.slice(1); if (id) visBog(decodeURIComponent(id)); else { hjemFra = false; visHylde(); } });
+// tryk på titlen i afspilleren → gå til bogen
+$("#nu").onclick = () => { if (aktivBog && location.hash.slice(1) !== aktivBog.id) { hjemFra = true; visBog(aktivBog.id); } };
 
 // ——— start ———
 (async () => {
